@@ -24,11 +24,12 @@ $ jupyter notebook
 ## Setting a new conda environment from scratch
 
 ```bash
+$ conda create --name match python=3.9 jupyter matplotlib
+$ conda activate match
+
 # reinstall soundfile
 $ pip install --upgrade --force-reinstall soundfile
 
-$ conda create --name match python=3.9 jupyter matplotlib
-$ conda activate match
 $ conda install -c conda-forge librosa
 $ conda install -c conda-forge pyaudio
 $ conda install -c conda-forge numpy
