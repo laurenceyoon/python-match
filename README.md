@@ -21,6 +21,8 @@ $ conda activate match
 $ jupyter notebook
 ```
 
+if there's issue about `portaudio` installation on Mac M1, please refer to [here](https://stackoverflow.com/a/68822818)
+
 ## Setting a new conda environment from scratch
 
 ```bash
@@ -30,7 +32,6 @@ $ conda activate match
 # reinstall soundfile
 $ pip install --upgrade --force-reinstall soundfile
 
-$ conda install -c conda-forge librosa
-$ conda install -c conda-forge pyaudio
-$ conda install -c conda-forge numpy
+$ conda install -c conda-forge librosa pyaudio numpy
+$ python -m ipykernel install —user —name match
 ```
