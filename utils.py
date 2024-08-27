@@ -66,7 +66,6 @@ class AudioStream(threading.Thread):
 
     def __init__(
         self,
-        queue: Queue,
         feature_type: str = FEATURE_TYPE,
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
@@ -76,8 +75,8 @@ class AudioStream(threading.Thread):
         self.feature_type = feature_type
         self.sample_rate = sample_rate
         self.hop_length = hop_length
-        self.queue = queue
         self.chunk_size = chunk_size * self.hop_length
+        self.queue = Queue()
         self.format = pyaudio.paFloat32
         self.audio_interface = pyaudio.PyAudio()
         self.audio_stream: Optional[pyaudio.Stream] = None
@@ -160,7 +159,6 @@ class MockAudioStream(AudioStream):
 
     def __init__(
         self,
-        queue: Queue,
         file_path: str = "",
         feature_type: str = FEATURE_TYPE,
         sample_rate: int = SAMPLE_RATE,
@@ -170,7 +168,6 @@ class MockAudioStream(AudioStream):
         super().__init__(
             sample_rate=sample_rate,
             hop_length=hop_length,
-            queue=queue,
             feature_type=feature_type,
             chunk_size=chunk_size,
         )
