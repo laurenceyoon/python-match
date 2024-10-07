@@ -1,12 +1,12 @@
 import time
 from enum import IntEnum
-import multiprocessing as mp
+
 import numpy as np
 import scipy
 from tqdm import tqdm
 
 from config import FRAME_PER_SEG, FRAME_RATE
-from stream import MockAudioStream, MockMultiprocessingAudioStream
+from stream import MockMultiprocessingAudioStream, MockThreadingAudioStream
 from utils import get_score_features, run_evaluation, visualize_warping_path
 
 WINDOW_SIZE = 3  # seconds
@@ -61,7 +61,7 @@ class OLTW:
     def __init__(
         self,
         reference_features,
-        conn,
+        queue,
         window_size=WINDOW_SIZE,
         local_cost_fun=DEFAULT_LOCAL_COST,
         max_run_count=MAX_RUN_COUNT,
@@ -70,6 +70,7 @@ class OLTW:
         **kwargs,
     ):
         self.reference_features = reference_features
+        self.queue = queue
         self.N_ref = self.reference_features.shape[0]
         self.input_features = np.empty((0, self.reference_features.shape[1]))
         self.w = int(window_size * frame_rate)
@@ -78,8 +79,6 @@ class OLTW:
         self.frame_per_seg = frame_per_seg
         self.current_position = 0
         self.wp = np.array([[0, 0]]).T  # [shape=(2, T)]
-        # self.queue = queue
-        self.conn = conn
         self.ref_pointer = 0
         self.input_pointer = 0
         self.input_index: int = 0
@@ -334,15 +333,8 @@ class OLTW:
         return next_direction
 
     def get_new_input(self):
-        # target_feature, f_time = self.queue.get()
-        try:
-            if self.conn.poll(timeout=3):
-                target_feature, f_time = self.conn.recv()
-            else:
-                pass
-        except EOFError:
-            return None
-        
+        target_feature, f_time = self.queue.get()
+
         if self.last_dequeue_time:
             self.elapsed_times.append(time.time() - self.last_dequeue_time)
         self.last_dequeue_time = time.time()
@@ -393,9 +385,8 @@ class OLTW:
 def run_score_following(score_file, performance_file):
     reference_features = get_score_features(score_file)
 
-    with MockAudioStream(performance_file) as perf_stream:
-        queue = perf_stream.queue
-        oltw = OLTW(reference_features, queue)
+    with MockThreadingAudioStream(performance_file) as perf_stream:
+        oltw = OLTW(reference_features, perf_stream.queue)
         warping_path = oltw.run()
 
         print(
@@ -410,11 +401,10 @@ def run_score_following(score_file, performance_file):
 
 def run_score_following_with_mp(score_file, performance_file):
     reference_features = get_score_features(score_file)
-    parent_conn, child_conn = mp.Pipe()
-    with MockMultiprocessingAudioStream(child_conn, performance_file) as perf_stream:
-        oltw = OLTW(reference_features, parent_conn)
-        warping_path = oltw.run()
 
+    with MockMultiprocessingAudioStream(performance_file) as perf_stream:
+        oltw = OLTW(reference_features, perf_stream.queue)
+        warping_path = oltw.run()
         print(
             f"[DTW] Mean elapsed time: {np.mean(oltw.elapsed_times)}, median: {np.median(oltw.elapsed_times)}"
         )
@@ -427,7 +417,7 @@ if __name__ == "__main__":
     score_file = "./resources/ex_score.mid"
     performance_file = "./resources/ex_perf.wav"
 
-    oltw, warping_path = run_score_following_with_mp(score_file, performance_file)
+    oltw, warping_path = run_score_following(score_file, performance_file)
 
     # Evaluation
     score_ann = "./resources/ex_score_annotations.txt"

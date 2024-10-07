@@ -19,6 +19,18 @@ class BaseAudioStream(ABC):
         pass
 
     @abstractmethod
+    def __enter__(self):
+        pass
+
+    @abstractmethod
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+
+    @abstractmethod
+    def _process_frame(self, data, frame_count, time_info, status_flag):
+        pass
+
+    @abstractmethod
     def run(self):
         pass
 
@@ -41,13 +53,30 @@ class AudioStream(BaseAudioStream):
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.chunk_size = chunk_size * self.hop_length
-        self.format = pyaudio.paFloat32
-        self.audio_interface = pyaudio.PyAudio()
-        self.audio_stream = None
         self.last_chunk = None
         self.init_time = None
-        self.listen = False
-        self.elapsed_times = []
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.stop()
+
+    def initialize_audio_device(self):
+        self.audio_interface = pyaudio.PyAudio()
+        self.audio_stream = self.audio_interface.open(
+            format=pyaudio.paFloat32,
+            channels=CHANNELS,
+            rate=self.sample_rate,
+            input=True,
+            frames_per_buffer=self.chunk_size,
+            stream_callback=self._process_frame,
+        )
+
+    def clear_queue(self):
+        if self.queue.not_empty:
+            self.queue.queue.clear()
 
 
 class ThreadingAudioStream(threading.Thread, AudioStream):
@@ -81,12 +110,10 @@ class ThreadingAudioStream(threading.Thread, AudioStream):
         self.hop_length = hop_length
         self.chunk_size = chunk_size * self.hop_length
         self.queue = Queue()
-        self.format = pyaudio.paFloat32
-        self.audio_interface = pyaudio.PyAudio()
+        self.audio_interface = None
         self.audio_stream: Optional[pyaudio.Stream] = None
         self.last_chunk = None
         self.init_time = None
-        self.listen = False
         self.elapsed_times = []
 
     def _process_frame(self, data, frame_count, time_info, status_flag):
@@ -127,35 +154,21 @@ class ThreadingAudioStream(threading.Thread, AudioStream):
         """
         return time.time() - self.init_time if self.init_time else None
 
-    def start_listening(self):
+    def run(self):
+        self.clear_queue()
+        self.initialize_audio_device()
         self.audio_stream.start_stream()
         print("* Start listening to audio stream....")
-        self.listen = True
         self.init_time = self.audio_stream.get_time()
 
-    def stop_listening(self):
+    def stop(self):
         print("* Stop listening to audio stream....")
         self.audio_stream.stop_stream()
         self.audio_stream.close()
         self.audio_interface.terminate()
-        self.listen = False
-
-    def run(self):
-        self.audio_stream = self.audio_interface.open(
-            format=self.format,
-            channels=CHANNELS,
-            rate=self.sample_rate,
-            input=True,
-            frames_per_buffer=self.chunk_size,
-            stream_callback=self._process_frame,
-        )
-        self.start_listening()
-
-    def stop(self):
-        self.stop_listening()
 
 
-class MockAudioStream(ThreadingAudioStream):
+class MockThreadingAudioStream(ThreadingAudioStream):
     """
     A class to process audio stream from a file
 
@@ -180,57 +193,43 @@ class MockAudioStream(ThreadingAudioStream):
             chunk_size=chunk_size,
         )
         self.file_path = file_path
-        self.last_time = None
-
-    def start_listening(self):
-        self.listen = True
-        self.init_time = time.time()
-
-    def stop_listening(self):
-        self.listen = False
 
     def mock_stream(self):
         duration = int(librosa.get_duration(path=self.file_path))
         time_interval = self.chunk_size / self.sample_rate  # 0.333 sec
-        # time.sleep(time_interval)  # 실제 시간과 동일하게 simulation
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
-            (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
+            (
+                audio_y,
+                np.zeros(int(duration * 0.1 * self.sample_rate), dtype=np.float32),
+            )
         )
         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
             : len(padded_audio) - (len(padded_audio) % self.chunk_size)
         ]
-        self.start_listening()
-        while self.listen and trimmed_audio.any():
+        while trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
-            time.sleep(time_interval)
+            # time.sleep(time_interval)
             f_time = time.time()
-            print(f"time interval: {f_time - self.last_time if self.last_time else 0}")
+            # print(f"time interval: {f_time - self.last_time if self.last_time else 0}")
             self.last_time = f_time
             self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.chunk_size :]
 
     def run(self):
-        if self.queue.not_empty:
-            self.queue.queue.clear()
+        self.clear_queue()
         print(f"* [Mocking] Loading existing audio file({self.file_path})....")
         self.mock_stream()
 
-    def __enter__(self):
-        self.start()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.stop()
+    def stop(self):
+        self.join()
 
 
 class MultiprocessingAudioStream(multiprocessing.Process, AudioStream):
-    def __init__(self, conn, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         multiprocessing.Process.__init__(self)
         AudioStream.__init__(self, *args, **kwargs)
-        self.conn = conn
-        self.listen = False
-        self.clear_pipe()
+        self.queue = multiprocessing.Queue()
 
     def _process_frame(self, data, frame_count, time_info, status_flag):
         target_audio = np.frombuffer(data, dtype=np.float32)  # initial y
@@ -258,61 +257,29 @@ class MultiprocessingAudioStream(multiprocessing.Process, AudioStream):
             )
 
         self.elapsed_times.append(time.time() - f_time)
-        self.conn.send((features_array, time.time()))
+        self.queue.put((features_array, time.time()))
         self.last_chunk = target_audio[-self.hop_length :]
 
-    def start_listening(self):
+    def run(self):
+        self.clear_queue()
+        self.initialize_audio_device()
         self.audio_stream.start_stream()
         print("* Start listening to audio stream....")
-        self.listen = True
         self.init_time = self.audio_stream.get_time()
 
-    def stop_listening(self):
+    def stop(self):
         print("* Stop listening to audio stream....")
         self.audio_stream.stop_stream()
         self.audio_stream.close()
         self.audio_interface.terminate()
-        self.listen = False
-
-    def run(self):
-        self.audio_stream = self.audio_interface.open(
-            format=self.format,
-            channels=CHANNELS,
-            rate=self.sample_rate,
-            input=True,
-            frames_per_buffer=self.chunk_size,
-            stream_callback=self._process_frame,
-        )
-        self.start_listening()
-
-    def stop(self):
-        self.running = False
-        self.terminate()  # 프로세스를 강제 종료
+        self.terminate()
         self.join()
-
-    def __enter__(self):
-        self.start()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.stop()
-        self.conn.close()
-
-    def clear_pipe(self):
-        """파이프의 모든 데이터를 비웁니다."""
-        while self.conn.poll():
-            try:
-                self.conn.recv()  # 데이터를 읽어들이면서 버림
-            except EOFError:
-                break
 
 
 class MockMultiprocessingAudioStream(MultiprocessingAudioStream):
-    def __init__(self, conn, file_path: str = "", *args, **kwargs):
-        super().__init__(conn, *args, **kwargs)
+    def __init__(self, file_path: str = "", *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.file_path = file_path
-        self.elapsed_times = []
-        self.last_time = None
 
     def mock_stream(self):
         duration = int(librosa.get_duration(path=self.file_path))
@@ -321,50 +288,31 @@ class MockMultiprocessingAudioStream(MultiprocessingAudioStream):
         padded_audio = np.concatenate(  # zero padding at the end
             (
                 audio_y,
-                np.zeros(int(duration * 2 * self.sample_rate), dtype=np.float32),
+                np.zeros(int(duration * 0.1 * self.sample_rate), dtype=np.float32),
             )
         )
         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
             : len(padded_audio) - (len(padded_audio) % self.chunk_size)
         ]
-        self.start_listening()
-        while self.listen and trimmed_audio.any():
+        while trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
-            # time.sleep(time_interval)
             f_time = time.time()
-            # print(f"time interval: {f_time - self.last_time if self.last_time else 0}")
             self.last_time = f_time
 
             self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.chunk_size :]
             self.elapsed_times.append(time.time() - f_time)
-            print(
-                f"[Feature extraction] Mean elapsed time: {np.mean(self.elapsed_times)}, median: {np.median(self.elapsed_times)}"
-            )
-
-        print(f"elapsed_times: {len(self.elapsed_times)}")
-        mean = np.mean(self.elapsed_times)
-        median = np.median(self.elapsed_times)
-        print(f"[Feature extraction] Mean elapsed time: {mean}, median: {median}")
-
-    def start_listening(self):
-        self.listen = True
-        self.init_time = time.time()
-
-    def stop_listening(self):
-        self.listen = False
+            # if counter == 3887:
+            #     print(
+            #         f"[Feature extraction] Mean elapsed time: {np.mean(self.elapsed_times)}, median: {np.median(self.elapsed_times)}"
+            #     )
+            # counter += 1
 
     def run(self):
+        self.clear_queue()
         print(f"* [Mocking] Loading existing audio file({self.file_path})....")
         self.mock_stream()
 
-    def __enter__(self):
-        self.start()
-        print("enter")
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.stop()
-
-        self.conn.close()
-        print("exit")
+    def stop(self):
+        self.terminate()
+        self.join()
