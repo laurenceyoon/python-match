@@ -336,18 +336,18 @@ class OLTW:
     def get_new_input(self):
         # target_feature, f_time = self.queue.get()
         try:
-            if self.conn.poll(timeout=3):  # 데이터가 올 때까지 대기 (timeout 설정 가능)
+            if self.conn.poll(timeout=3):
                 target_feature, f_time = self.conn.recv()
-                if self.last_dequeue_time:
-                    self.elapsed_times.append(time.time() - self.last_dequeue_time)
-                self.last_dequeue_time = time.time()
-                self.input_features = np.vstack([self.input_features, target_feature])
-                self.input_pointer += self.frame_per_seg
-                return target_feature
             else:
-                return None
+                pass
         except EOFError:
             return None
+        
+        if self.last_dequeue_time:
+            self.elapsed_times.append(time.time() - self.last_dequeue_time)
+        self.last_dequeue_time = time.time()
+        self.input_features = np.vstack([self.input_features, target_feature])
+        self.input_pointer += self.frame_per_seg
 
     def is_still_following(self):
         is_still_following = self.ref_pointer <= (self.N_ref - self.frame_per_seg)

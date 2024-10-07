@@ -180,6 +180,7 @@ class MockAudioStream(ThreadingAudioStream):
             chunk_size=chunk_size,
         )
         self.file_path = file_path
+        self.last_time = None
 
     def start_listening(self):
         self.listen = True
@@ -190,6 +191,8 @@ class MockAudioStream(ThreadingAudioStream):
 
     def mock_stream(self):
         duration = int(librosa.get_duration(path=self.file_path))
+        time_interval = self.chunk_size / self.sample_rate  # 0.333 sec
+        # time.sleep(time_interval)  # 실제 시간과 동일하게 simulation
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
             (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
@@ -200,7 +203,10 @@ class MockAudioStream(ThreadingAudioStream):
         self.start_listening()
         while self.listen and trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
+            time.sleep(time_interval)
             f_time = time.time()
+            print(f"time interval: {f_time - self.last_time if self.last_time else 0}")
+            self.last_time = f_time
             self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.chunk_size :]
 
@@ -306,9 +312,11 @@ class MockMultiprocessingAudioStream(MultiprocessingAudioStream):
         super().__init__(conn, *args, **kwargs)
         self.file_path = file_path
         self.elapsed_times = []
+        self.last_time = None
 
     def mock_stream(self):
         duration = int(librosa.get_duration(path=self.file_path))
+        time_interval = self.chunk_size / self.sample_rate  # 0.333 sec
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
             (
@@ -322,7 +330,11 @@ class MockMultiprocessingAudioStream(MultiprocessingAudioStream):
         self.start_listening()
         while self.listen and trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
+            # time.sleep(time_interval)
             f_time = time.time()
+            # print(f"time interval: {f_time - self.last_time if self.last_time else 0}")
+            self.last_time = f_time
+
             self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.chunk_size :]
             self.elapsed_times.append(time.time() - f_time)
