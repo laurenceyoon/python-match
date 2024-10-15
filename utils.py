@@ -1,15 +1,10 @@
 import json
-import threading
-import time
-from queue import Queue
-from typing import Optional
 
 import librosa
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pretty_midi
-import pyaudio
 import scipy
 
 CHANNELS = 1

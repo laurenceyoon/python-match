@@ -1,7 +1,5 @@
 from datetime import datetime
 
-import numpy as np
-
 from online_dtw import OLTW
 from stream import AudioStream
 from utils import get_score_features, run_evaluation, visualize_warping_path
