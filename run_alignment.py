@@ -17,13 +17,6 @@ def run_score_following(score_file, performance_file):
                 f"[{datetime.now().strftime('%H:%M:%S.%f')}] Current position: {current_position}"
             )
 
-        print(
-            f"[Feature extraction] Mean elapsed time: {np.mean(stream.elapsed_times):.5f}, median: {np.median(stream.elapsed_times):.5f}"
-        )
-        print(
-            f"[DTW] Mean elapsed time: {np.mean(oltw.elapsed_times):.5f}, median: {np.median(oltw.elapsed_times):.5f}"
-        )
-
     return oltw, oltw.warping_path
 
 

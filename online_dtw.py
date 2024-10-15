@@ -82,8 +82,6 @@ class OLTW:
         self.input_index: int = 0
         self.run_count = 0
         self.previous_direction = None
-        self.elapsed_times = []
-        self.last_dequeue_time = None
 
     @property
     def warping_path(self):  # [shape=(2, T)]
@@ -332,10 +330,6 @@ class OLTW:
 
     def get_new_input(self):
         target_feature, f_time = self.queue.get()
-
-        if self.last_dequeue_time:
-            self.elapsed_times.append(time.time() - self.last_dequeue_time)
-        self.last_dequeue_time = time.time()
         self.input_features = np.vstack([self.input_features, target_feature])
         self.input_pointer += self.frame_per_seg
 
